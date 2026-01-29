@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: wakato-video-downloader
+    runtime: docker
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    healthCheckPath: /health
