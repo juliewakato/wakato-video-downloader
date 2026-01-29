@@ -181,7 +181,13 @@ def detect_platform(url: str) -> str:
     else:
         return 'unknown'
 
+@app.on_event("startup")
+async def startup_event():
+    print("✅ Video download service starting up...")
+    os.makedirs("/tmp/videos", exist_ok=True)
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
+    print(f"Starting server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
