@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import yt_dlp
 import os
@@ -21,22 +22,22 @@ app.add_middleware(
 )
 
 # Thread pool for blocking yt-dlp operations
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=2)
 
 class DownloadRequest(BaseModel):
     url: str
-    quality: Optional[str] = "720"  # 360, 480, 720, 1080, best
+    quality: Optional[str] = "720"
 
 class DownloadResponse(BaseModel):
     video_url: str
-    title: Optional[str]
-    duration: Optional[int]
-    thumbnail: Optional[str]
-    platform: Optional[str]
-    width: Optional[int]
-    height: Optional[int]
-    format_id: Optional[str]
-    ext: Optional[str]
+    title: Optional[str] = None
+    duration: Optional[int] = None
+    thumbnail: Optional[str] = None
+    platform: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    format_id: Optional[str] = None
+    ext: Optional[str] = None
 
 @app.get("/health")
 async def health():
@@ -46,7 +47,6 @@ async def health():
 async def download_video(request: DownloadRequest):
     """Download video and return direct URL"""
     
-    # Create temp directory
     temp_dir = tempfile.mkdtemp()
     
     try:
@@ -66,27 +66,18 @@ async def download_video(request: DownloadRequest):
             'no_warnings': True,
         }
         
-        # Extract info and download
         def download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Get info first
-                info = ydl.extract_info(request.url, download=False)
-                
-                # Download the video
-                ydl.download([request.url])
-                
+                info = ydl.extract_info(request.url, download=True)
                 return info
         
-        # Run in thread pool (yt-dlp is blocking)
         info = await asyncio.get_event_loop().run_in_executor(executor, download)
         
-        # Find the downloaded file
         video_id = info['id']
         ext = info.get('ext', 'mp4')
         downloaded_file = os.path.join(temp_dir, f"{video_id}.{ext}")
         
         if not os.path.exists(downloaded_file):
-            # Try to find any file with video_id
             files = os.listdir(temp_dir)
             for f in files:
                 if video_id in f:
@@ -94,13 +85,11 @@ async def download_video(request: DownloadRequest):
                     ext = f.split('.')[-1]
                     break
         
-        # Move to a persistent location (we'll serve from here)
         persistent_dir = "/tmp/videos"
         os.makedirs(persistent_dir, exist_ok=True)
         final_path = os.path.join(persistent_dir, f"{video_id}.{ext}")
         shutil.move(downloaded_file, final_path)
         
-        # Detect platform
         platform = detect_platform(request.url)
         
         return DownloadResponse(
@@ -116,15 +105,12 @@ async def download_video(request: DownloadRequest):
         )
         
     except Exception as e:
-        # Cleanup temp dir
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail=f"Download failed: {str(e)}")
 
 @app.get("/videos/{filename}")
 async def serve_video(filename: str):
     """Serve downloaded video file"""
-    from fastapi.responses import FileResponse
-    
     file_path = f"/tmp/videos/{filename}"
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Video not found")
@@ -147,7 +133,6 @@ async def extract_info(request: DownloadRequest):
         
         info = await asyncio.get_event_loop().run_in_executor(executor, get_info)
         
-        # Get available formats
         formats = []
         if 'formats' in info:
             for f in info['formats']:
@@ -166,7 +151,7 @@ async def extract_info(request: DownloadRequest):
             'thumbnail': info.get('thumbnail'),
             'platform': detect_platform(request.url),
             'uploader': info.get('uploader'),
-            'formats': formats[:10]  # Limit to first 10
+            'formats': formats[:10]
         }
         
     except Exception as e:
